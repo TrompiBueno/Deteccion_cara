@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Detección de Cara</title>
+
+<style>
+body {
+  margin: 0;
+  background: black;
+  overflow: hidden;
+  font-family: monospace;
+  color: cyan;
+}
+
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+video { display: none; }
+
+#panel {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  width: 320px;
+  background: rgba(0,0,0,0.85);
+  border: 1px solid cyan;
+  padding: 12px;
+  z-index: 10;
+}
+
+h2 {
+  margin: 0 0 10px;
+  text-align: center;
+  font-size: 16px;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #00aaaa;
+  margin: 8px 0;
+}
+
+#status {
+  margin-top: 8px;
+  color: lime;
+  font-size: 13px;
+}
+
+a {
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  color: cyan;
+  text-decoration: none;
+  border: 1px solid cyan;
+  padding: 6px;
+}
+a:hover {
+  background: cyan;
+  color: black;
+}
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+  <h2>DETECCIÓN DE CARA</h2>
+
+  <label><input type="checkbox" id="showCamera"> Mostrar cámara</label>
+
+  <hr>
+
+  <label><input type="checkbox" id="showPoints"> Puntos</label>
+  <label><input type="checkbox" id="showLines"> Líneas</label>
+  <label><input type="checkbox" id="showOutline"> Contorno</label>
+
+  <hr>
+
+  <strong>Zonas</strong>
+  <label><input type="checkbox" id="zoneEyes"> Ojos</label>
+  <label><input type="checkbox" id="zoneNose"> Nariz</label>
+  <label><input type="checkbox" id="zoneMouth"> Boca</label>
+
+  <hr>
+
+  <label><input type="checkbox" id="showBlink"> Parpadeo</label>
+  <label><input type="checkbox" id="showMouthOpen"> Boca abierta</label>
+  <label><input type="checkbox" id="showAngle"> Ángulo cabeza</label>
+
+  <div id="status"></div>
+
+  <a href="https://trompibueno.github.io/Deteccion">Ir al inicio</a>
+</div>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusBox = document.getElementById("status");
+
+const showCamera = document.getElementById("showCamera");
+const showPoints = document.getElementById("showPoints");
+const showLines = document.getElementById("showLines");
+const showOutline = document.getElementById("showOutline");
+
+const zoneEyes = document.getElementById("zoneEyes");
+const zoneNose = document.getElementById("zoneNose");
+const zoneMouth = document.getElementById("zoneMouth");
+
+const showBlink = document.getElementById("showBlink");
+const showMouthOpen = document.getElementById("showMouthOpen");
+const showAngle = document.getElementById("showAngle");
+
+// todo apagado por defecto
+document.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
+
+// índices de zonas
+const EYES = [33,133,159,145,362,263,386,374];
+const NOSE = [1,2,98,327,168];
+const MOUTH = [13,14,78,308,61,291];
+
+const FACE_OUTLINE = [
+  10,338,297,332,284,251,389,356,454,323,361,288,
+  397,365,379,378,400,377,152,148,176,149,150,
+  136,172,58,132,93,234,127,162,21,54,103,67,
+  109,10
+];
+
+const LINE_CONNECTIONS = [];
+for (let i = 0; i < 468; i++) {
+  if (i + 1 < 468) LINE_CONNECTIONS.push([i, i + 1]);
+}
+
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+let latestFace = null;
+let busy = false;
+
+const faceMesh = new FaceMesh({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+});
+
+faceMesh.setOptions({
+  maxNumFaces: 1,
+  refineLandmarks: true,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
+
+faceMesh.onResults(r => {
+  latestFace = r;
+  busy = false;
+});
+
+function drawZone(face, indices, color) {
+  ctx.fillStyle = color;
+  indices.forEach(i => {
+    const p = face[i];
+    ctx.fillRect(
+      p.x * canvas.width - 2,
+      p.y * canvas.height - 2,
+      4, 4
+    );
+  });
+}
+
+function drawFace(face) {
+  let info = "";
+
+  if (showBlink.checked) {
+    if (dist(face[159], face[145]) < 0.015)
+      info += "👁 Parpadeo<br>";
+  }
+
+  if (showMouthOpen.checked) {
+    if (dist(face[13], face[14]) > 0.03)
+      info += "👄 Boca abierta<br>";
+  }
+
+  if (showAngle.checked) {
+    const angle = Math.atan2(
+      face[152].y - face[10].y,
+      face[152].x - face[10].x
+    ) * 180 / Math.PI;
+    info += `🧠 Ángulo: ${angle.toFixed(1)}°<br>`;
+  }
+
+  statusBox.innerHTML = info;
+
+  if (showPoints.checked) {
+    ctx.fillStyle = "#00ffff";
+    face.forEach(p =>
+      ctx.fillRect(p.x * canvas.width - 1, p.y * canvas.height - 1, 2, 2)
+    );
+  }
+
+  if (showLines.checked) {
+    ctx.strokeStyle = "rgba(0,255,255,0.3)";
+    LINE_CONNECTIONS.forEach(l => {
+      const a = face[l[0]], b = face[l[1]];
+      ctx.beginPath();
+      ctx.moveTo(a.x * canvas.width, a.y * canvas.height);
+      ctx.lineTo(b.x * canvas.width, b.y * canvas.height);
+      ctx.stroke();
+    });
+  }
+
+  if (showOutline.checked) {
+    ctx.strokeStyle = "#00ffcc";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    FACE_OUTLINE.forEach((i, n) => {
+      const p = face[i];
+      n === 0
+        ? ctx.moveTo(p.x * canvas.width, p.y * canvas.height)
+        : ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  if (zoneEyes.checked) drawZone(face, EYES, "#00ff00");
+  if (zoneNose.checked) drawZone(face, NOSE, "#ffff00");
+  if (zoneMouth.checked) drawZone(face, MOUTH, "#ff00ff");
+}
+
+function render() {
+  if (video.videoWidth === 0) {
+    requestAnimationFrame(render);
+    return;
+  }
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  if (showCamera.checked) {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  if (latestFace?.multiFaceLandmarks?.length) {
+    drawFace(latestFace.multiFaceLandmarks[0]);
+  }
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+
+const camera = new Camera(video, {
+  onFrame: async () => {
+    if (!busy) {
+      busy = true;
+      await faceMesh.send({ image: video });
+    }
+  },
+  width: 640,
+  height: 480
+});
+
+camera.start();
+</script>
+</body>
+</html>
